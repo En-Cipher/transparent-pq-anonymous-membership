@@ -1,0 +1,9 @@
+# Keep shell scripts LF so they run on Linux/macOS regardless of the committer's OS.
+*.sh    text eol=lf
+verify.sh text eol=lf
+# PowerShell scripts stay CRLF for Windows.
+*.ps1   text eol=crlf
+# Treat the built PDF as binary (never line-ending-munged).
+*.pdf   binary
+# Everything else: normalize to LF in the repo, auto on checkout.
+*       text=auto

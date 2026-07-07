@@ -1,0 +1,25 @@
+name: verify
+
+# Self-checking reproduction: builds the pinned libQ artifact and runs the
+# construction / under-constraint audit / zero-knowledge / soundness tests that
+# back the paper's claims. (The Section 5.4 measurement harnesses are #[ignore]d
+# and not run here; timings are hardware-dependent, see REPRODUCE.md.)
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: "1.96.0"
+      - name: cargo test (lib-q-zkp)
+        working-directory: artifact/libQ
+        run: cargo test --release -p lib-q-zkp

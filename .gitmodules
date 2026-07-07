@@ -1,0 +1,3 @@
+[submodule "artifact/libQ"]
+	path = artifact/libQ
+	url = https://github.com/Enkom-Tech/libQ.git

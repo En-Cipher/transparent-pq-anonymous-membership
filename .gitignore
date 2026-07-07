@@ -1,0 +1,18 @@
+# LaTeX build artifacts (the committed PDF is the canonical built output)
+paper/*.aux
+paper/*.log
+paper/*.out
+paper/*.fls
+paper/*.fdb_latexmk
+paper/*.synctex.gz
+paper/*.bbl
+paper/*.blg
+paper/*.toc
+latexmk.log
+
+# Rust build output (inside the submodule, but ignore defensively)
+target/
+
+# OS cruft
+.DS_Store
+Thumbs.db

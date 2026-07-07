@@ -1,0 +1,638 @@
+% Transparent, Post-Quantum Anonymous Set Membership from FRI-STARKs over BabyBear and Mersenne-31
+% LaTeX export of the ePrint draft (auto-converted from the Markdown source; repo metadata stripped).
+% Compiles with pdflatex (article class + standard packages). To target IACR formatting, swap
+% \documentclass{article} for {iacrcc} or {llncs} and adjust the title/author block accordingly.
+\documentclass[11pt]{article}
+
+\usepackage{lmodern}        % scalable Latin Modern fonts (needed for microtype expansion)
+\usepackage[T1]{fontenc}
+\usepackage[utf8]{inputenc}
+\usepackage[margin=1in]{geometry}
+\usepackage{amsmath,amssymb,amsthm}
+\usepackage{booktabs}
+\usepackage{enumitem}
+\usepackage{microtype}
+\usepackage{xurl}           % allow long URLs to break anywhere (fixes overfull lines in the bibliography)
+\usepackage[hidelinks]{hyperref}
+
+\setlength{\emergencystretch}{3em}  % soak up tiny (<2pt) overfull lines
+\setlength{\tabcolsep}{4pt}         % tighter table columns so the wide tables fit
+
+\newcommand{\GF}[1]{\mathrm{GF}(#1)}
+\newcommand{\cat}{\mathbin{\|}}          % field-sequence concatenation separator
+\newcommand{\wout}{w_{\mathrm{out}}}
+
+\title{Transparent, Post-Quantum Anonymous Set Membership\\
+from FRI-STARKs over BabyBear and Mersenne-31}
+\author{Enoch Kuskoff\\ Enkom Tech\\ \texttt{en.cipher@enkom.tech}}
+\date{}
+
+\begin{document}
+\maketitle
+
+\begin{center}\itshape
+A construction-and-analysis note that solicits external review of its security arguments.
+\end{center}
+
+\begin{quote}
+\textbf{Scope of this note.} A self-contained description of a transparent anonymous set-membership
+argument and its security analysis, presented as a generic primitive. The building blocks
+(FRI-STARKs, Poseidon, sponge hashing, nullifier-based membership) are standard; the contribution is
+the \emph{concrete instantiation and its parameters} together with an explicit security analysis. We
+do \textbf{not} claim the construction is proven secure: two central questions, the
+$\GF{p^2}$-state Poseidon round counts (O1, specific to Arm A) and the formal zero-knowledge
+simulator (O4, shared by both arms), are stated as \textbf{open problems on which we solicit review}
+(Sections 6--7), not as established results (O2 and O3 reduce to the permutation's security, i.e.\ O1).
+\end{quote}
+
+\begin{abstract}
+We describe and analyze a transparent, plausibly post-quantum argument of \emph{anonymous set
+membership with a nullifier}: a prover demonstrates, in zero knowledge, that it knows a secret $t$
+whose leaf $L = H(t)$ lies in a public Merkle accumulator with root $\mathit{root}$, and
+simultaneously publishes a context-bound nullifier $N = H(\mathit{domain} \cat t \cat \mathit{ctx})$
+that is unlinkable across contexts but stable within one. The argument is a FRI-STARK over a small
+$31$-bit prime field, using a single algebraic hash (a Poseidon-family permutation in a wide-sponge
+mode) for the leaf, every Merkle node, and the nullifier. Transparency (no trusted setup) and a
+hash-only soundness assumption make the construction conservative against quantum adversaries.
+
+We give a complete security analysis along four axes: (O1) algebraic / Gr\"obner-basis security of
+the permutation round counts; (O2) collision and second-preimage resistance of the truncated-output
+sponge; (O3) domain separation between the leaf and nullifier pre-images; and (O4) the zero-knowledge
+simulator for the hiding-PCS instantiation. We \textbf{implement, measure, and compare} two field
+instantiations of the hash. Arm A runs the permutation \emph{state} over the quadratic extension
+$\GF{p^2}$ of Mersenne-31; Arm B runs over the base field of BabyBear with the deployed Poseidon2.
+Both are implemented, and their proof-system soundness is computed to $128$-bit post-quantum
+(Section 6.5); at equal security, \textbf{Arm B's proofs are $\approx 14$--$18\times$ smaller and
+verify $\approx 16$--$17\times$ faster}, and we recommend it. We explicitly solicit review of the two
+residuals our engineering arguments do not settle: the extension-field round-count parameterization
+\emph{specific to Arm A} (O1), and the zero-knowledge simulator's masking-degree budget (O4, shared
+by both arms).
+
+\smallskip
+\noindent\textbf{Keywords:} anonymous set membership $\cdot$ nullifiers $\cdot$ zero-knowledge proofs
+$\cdot$ FRI-STARKs $\cdot$ transparent setup $\cdot$ post-quantum cryptography $\cdot$
+Poseidon\,/\,Poseidon2 $\cdot$ algebraic hashing $\cdot$ BabyBear\,/\,Mersenne-31.
+\end{abstract}
+
+\section{Introduction}
+
+Anonymous set membership with nullifiers underlies anonymous signaling, one-person-one-vote /
+rate-limiting, private credentials, and privacy-preserving messaging (e.g.\ Semaphore-style signaling
+\cite{Sem}, rate-limiting nullifiers \cite{RLN}, and privacy pools). The standard shape is: members
+are accumulated in a Merkle tree over a commitment $H(t)$ of a secret $t$; to act, a member proves in
+zero knowledge that its leaf is in the tree and reveals a deterministic nullifier $N$ derived from
+$t$ and a context, so that double-action \emph{within} a context is detectable while actions
+\emph{across} contexts are unlinkable.
+
+Most deployed instantiations use pairing- or discrete-log-based SNARKs (Groth16, PLONK) with a
+trusted or universal setup, and rely on assumptions broken by a quantum adversary. We target a
+\textbf{transparent} (setup-free) and \textbf{plausibly post-quantum} instantiation by realizing the
+relation as an AIR proven with a \textbf{FRI-STARK} \cite{BBHR18,BGKS20}, whose soundness rests only
+on collision resistance of a hash and the FRI low-degree test. The single algebraic hash is a
+Poseidon-family permutation \cite{GKRRS21,GKS23} in a wide-sponge mode, chosen for low AIR degree.
+
+A second post-quantum route is \emph{lattice-based} succinct ZK, e.g.\ LaBRADOR \cite{LaBRADOR} and
+the recent toolkit of Biasioli et al.\ \cite{BBL26} that adds zero-knowledge to it, which yields
+markedly smaller proofs (under $100$\,KB) but rests on structured-lattice assumptions
+(Module-SIS\,/\,LWE). We deliberately take the more conservative \emph{hash-only} path (its sole
+assumption is collision resistance and it needs no trusted setup), and target a purpose-built
+membership relation rather than a general prover (Section 5).
+
+\paragraph{Contributions.}
+\begin{enumerate}[leftmargin=*]
+\item A self-contained description of the membership AIR: trace layout, in-circuit sponge constraints,
+  Merkle path threading, the nullifier sub-circuit, and the public-input binding (Sections 3--4).
+\item Two concrete, \textbf{implemented and measured} field instantiations of the hash: a
+  $\GF{p^2}$-\emph{state} variant over Mersenne-31 (Arm A) and a base-field Poseidon2 variant over
+  BabyBear (Arm B), with their digest widths, security margins, wire sizes, and a side-by-side cost
+  comparison (Section 5).
+\item A four-axis security analysis (O1--O4, Section 6) carried out against the published round-count
+  and sponge-indifferentiability bounds, including an adversarial self-check against the recent
+  algebraic-attack literature.
+\item A precise statement of the two residual questions on which we seek external review (Section 7).
+\end{enumerate}
+
+We make no claim that the underlying techniques are new. The value we hope to add is a \emph{published,
+reviewable} concrete parameter set and analysis for a transparent, hash-only anonymous-membership
+argument over a small prime field.
+
+\section{Preliminaries}
+
+\paragraph{Field.} Arm A uses $p = 2^{31} - 1$ (Mersenne-31), a 31-bit prime; $\GF{p^2}$ denotes the
+quadratic extension realized as \texttt{Complex<GF(p)>} with $i^2 = -1$ (valid since $-1$ is a
+non-residue: $p \equiv 3 \pmod 4$); a $\GF{p^2}$ element packs two base limbs, $\log_2|\GF{p^2}|
+\approx 62$. Arm B (Section 5.2) instead uses the \textbf{BabyBear} prime $q = 2^{31} - 2^{27} + 1$
+(also $31$-bit, but two-adic of order $2^{27}$) as its base field. Field-generic statements below are
+written over $F$.
+
+\paragraph{Algebraic permutation.} We use a Poseidon-family permutation $\pi$ over $F^t$ (state width
+$t$) with an $x^\alpha$ S-box: $\alpha = 5$ for Arm A ($\gcd(5, p-1) = \gcd(5, p^2-1) = 1$, so $x^5$
+permutes both $\GF{p}$ and $\GF{p^2}$); $\alpha = 7$ for Arm B (since $5 \mid q-1$ makes $x^5$
+non-bijective over BabyBear). There are $R_F$ full rounds and $R_P$ partial rounds, ARC
+(add-round-constant), and an MDS / Poseidon2 external$+$internal linear layer. Round constants are
+derived by an XOF / Grain-LFSR from a fixed domain string.
+
+\paragraph{Sponge.} $H$ is the sponge \cite{BDPV07} over $\pi$ with rate $r$, capacity $c$
+($t = r + c$), \texttt{10*1} padding, and a \emph{truncated} output equal to the first $\wout$ cells
+of the final state. We use $H$ for the leaf $L = H(t)$, every Merkle node
+$H(\mathit{left} \cat \mathit{right})$, and the nullifier $N = H(\mathit{domain} \cat t \cat
+\mathit{ctx})$.
+
+\paragraph{FRI-STARK / AIR.} The relation is expressed as an Algebraic Intermediate Representation
+(AIR): an execution trace (a matrix over the field) and a set of polynomial constraints of bounded
+degree, proven low-degree after the relation is reduced to a quotient via FRI \cite{BBHR18}. We use a
+STARK whose trace, constraints, and FRI all live over a common field $F$ (Section 5 discusses
+$F = \GF{p^2}$ for Arm A vs.\ the two-adic base-field BabyBear configuration for Arm B; both run on a
+radix-2 FRI domain, not a circle-STARK \cite{HLP24}).
+
+\paragraph{Zero-knowledge.} Plain STARK traces are not zero-knowledge. We obtain ZK via a \emph{hiding}
+polynomial commitment: the trace is low-degree-extended at an increased blow-up with
+vanishing-polynomial randomization, Merkle commitments are salted with fresh CSPRNG output, and FRI
+runs on the randomized codeword \cite{Hab22,BCRSVW19}. Only the public statement
+$(\mathit{root}, \mathit{ctx}, N)$ is revealed.
+
+\section{The Membership Relation}
+
+Fix a domain constant $\mathit{domain}$ (a baked circuit constant, \emph{not} a witness or public
+input), derived as the first $|\mathit{domain}|$ cells of $H(S)$ for a fixed statement string $S$.
+The argument proves, for public $(\mathit{root}, \mathit{ctx}, N)$:
+\[
+\begin{aligned}
+\exists\,(t, \mathit{path}) :\quad
+  & \textsf{MerkleVerify}(\mathit{root},\, L = H(t),\, \mathit{path}) = \textsf{true} \\
+  & \wedge\ N = H(\mathit{domain} \cat t \cat \mathit{ctx}) \\
+\text{reveal only } & (\mathit{root}, \mathit{ctx}, N); \quad L \text{ and } t \text{ remain secret.}
+\end{aligned}
+\]
+$\mathit{root}$ is the verifier-supplied, trusted accumulator root; $\mathit{ctx}$ is a public
+per-context label; $N$ is the nullifier. Membership soundness reduces to: a prover cannot make the
+AIR accept unless it folds a genuine $H(t)$ to the trusted $\mathit{root}$ and emits the
+correctly-derived $N$. Anonymity reduces to: the proof, $\mathit{root}$, and $N$ reveal nothing about
+which leaf $L$ was used (within the anonymity set of the tree) and $N$ is unlinkable across distinct
+$\mathit{ctx}$.
+
+\section{Construction (the AIR)}
+
+\paragraph{Trace.} One row per Merkle level, plus row-0 carrying the leaf and nullifier sponge blocks.
+The public values are the $\wout$-cell $\mathit{root}$, the $|\mathit{ctx}|$-cell $\mathit{ctx}$, and
+the $\wout$-cell $N$.
+
+\paragraph{In-circuit sponge.} Each hash invocation is unrolled into $\lfloor L/r \rfloor + 1$
+permutation applications ($L = $ input length in cells). Every round intermediate is pinned by
+exactly one constraint: ARC, the $x^\alpha$ S-box, and the linear layer in full rounds; in partial rounds
+the non-active lanes are copy-constrained so they cannot be freely chosen. Capacity is threaded as
+the linear-layer \emph{expression} between permutations (no free capacity column), and the digest is
+the first $\wout$ cells of the genuine final-state expression, never a free read-back column. The
+absorb $+$ \texttt{10*1} padding schedule matches a value-level reference, checked across input
+lengths.
+
+\paragraph{Merkle threading.} Per level: a boolean $\mathit{dir}$ selects the node input order
+($(\mathit{running}, \mathit{sibling})$ vs.\ $(\mathit{sibling}, \mathit{running})$);
+$\mathit{running}$ is updated to the node hash; a transition constraint forces
+$\mathit{running}' = \mathit{parent}$ (next-row $\mathit{running}$); the last row binds
+$\mathit{parent} = \mathit{root}$. Trees of varying depth are handled by deterministically extending
+$\mathit{root}$ with zero-sibling levels (padding-blind in the AIR; soundness rests on the verifier
+feeding its \emph{own} trusted $\mathit{root}$).
+
+\paragraph{Nullifier.} The $|\mathit{domain}|$-cell $\mathit{domain}$ prefix is injected as constant expressions (no
+committed domain column). The pre-image is exactly $\mathit{domain} \cat t \cat \mathit{ctx}$. The
+single committed $t$ slice feeds \emph{both} the leaf sponge and the nullifier pre-image (so leaf and
+nullifier are structurally same-$t$). Row-0 gated constraints bind $\mathit{running} = L$,
+$\mathit{ctx}$ to the public $\mathit{ctx}$, and the nullifier output to the public $N$.
+
+\paragraph{Degree.} Max constraint degree is $\alpha$ (the ungated $x^\alpha$ S-box: $5$ for Arm A, $7$ for Arm B); selectors gate only
+degree-1 bindings. The quotient-chunk count is derived from the constraint AST by both prover and
+verifier, so any degree overflow fails at prove time.
+
+A structural audit of this AIR (sponge under-constraint, Merkle threading, leaf / same-$t$, nullifier
+integrity, padding rows, padding-root, public binding, degree / FRI config) found no relation a
+malicious prover can exploit to accept a proof that violates the decoded statement, \emph{modulo} the
+cryptographic assumptions O1--O4 below.
+
+\section{Field Instantiation}
+
+The single design lever with security and cost consequences is the \textbf{field over which the hash
+permutation state runs}. We describe, implement, and measure both arms. \textbf{Both are realized,
+and their proof-system soundness computes to $128$-bit post-quantum (Section 6.5); Arm B is the
+instantiation we recommend.} Arm A runs the permutation state over the quadratic extension
+$\GF{p^2}$ of Mersenne-31; Arm B runs over the base field of BabyBear with the deployed Poseidon2.
+Measured at equal security, Arm B's proofs are $\approx 14$--$18\times$ smaller and verify
+$\approx 16$--$17\times$ faster (Section 5.4), and its round-count obligation (O1) is a near-citation
+of a standard parameter set rather than the novel extension-field analysis Arm A requires. All other
+aspects of the construction (Sections 3--4) are identical between the two.
+
+\subsection{Arm A: \texorpdfstring{$\GF{p^2}$}{GF(p2)}-state (the analyzed instantiation)}
+
+State width $t = 7$, rate $r = 2$, capacity $c = 5$, $R_F = 8$, $R_P = 60$, $\alpha = 5$, over
+$\GF{p^2}$. Each state cell is a $\GF{p^2}$ element ($\approx 62$ bits). Digest $\wout = 5$ cells
+$= 5 \times 8 = 40$ bytes $= 5 \times 62 \approx 310$ bits. The STARK trace, constraints, and FRI all
+run over $\GF{p^2}$.
+\begin{itemize}[leftmargin=*]
+\item \textbf{Pro:} the wide $\approx 62$-bit cells give a $5$-cell, $310$-bit digest and $155$-bit
+  capacity collision resistance with only $c = 5$.
+\item \textbf{Con:} running the \emph{whole} trace and FRI over $\GF{p^2}$ pays a $\approx 2\times$
+  field tax on all prover arithmetic and committed data; and the published round-count formulas
+  (Section 6, O1) target the \emph{base} prime field, so the extension-field state requires the
+  dedicated analysis of O1.
+\end{itemize}
+The FRI challenges are drawn from a \textbf{degree-3 extension $\GF{p^6} \approx 186$ bits}: the
+$\approx 62$-bit value field is too small to serve as its own challenge field at $128$-bit soundness,
+so the membership prover / verifier lift the challenge / OOD sampling into $\GF{p^6}$ (Section 6.5).
+
+Public statement: $\mathit{root}(40) \cat \mathit{ctx}(16) \cat N(40) = 96$ bytes; per-cell encoding
+$4$-byte real $\cat$ $4$-byte imaginary, canonical.
+
+\subsection{Arm B: base-field BabyBear / Poseidon2 (the realized, recommended instantiation)}
+
+State width $t = 16$, $R_F = 8$ ($4 + 4$), $R_P = 13$, $\alpha = 7$, over the \textbf{BabyBear} prime
+field $q = 2^{31} - 2^{27} + 1$ ($\log_2 q \approx 30.9$), using the \emph{deployed} Poseidon2
+parameters \cite{GKS23,Plonky3}: the external block-circulant $4 \times 4$ MDS layer, the optimized
+internal diagonal, and Grain-LFSR round constants from the reference generator, i.e.\ the width-16
+instance shipped by Plonky3 / SP1. BabyBear, not Mersenne-31, is the base field for a deliberate
+reason: M31's base field has 2-adicity $1$ (no radix-2 FFT subgroup), so a base-M31 STARK would
+require \emph{circle} STARKs \cite{HLP24}; BabyBear's 2-adicity $27$ gives a native two-adic FFT
+domain, so Arm B runs on the \textbf{same \texttt{TwoAdicFriPcs}} machinery as Arm A; only the field
+and permutation change, not the proof system. BabyBear's S-box is $x^7$ ($\alpha = 7$, since
+$5 \mid q-1$ makes $x^5$ non-bijective).
+
+To preserve a $\geq 256$-bit digest with $\approx 31$-bit cells, the capacity and output widen to
+$\lceil 256/30.9 \rceil = 9$ cells: sponge $t = 16,\ r = 7,\ c = 9,\ \wout = 9$ ($\approx 278$-bit
+capacity $\to \approx 139$-bit collision; $9 \times 4 = 36$-byte digest). FRI challenges are drawn
+from a degree-5 extension $\GF{q^5} \approx 155$ bits, sized for $128$-bit soundness (Section 6.5).
+\begin{itemize}[leftmargin=*]
+\item \textbf{Pro:} O1 reduces from a novel extension-field analysis to a near-\emph{citation} of the
+  standard, widely-deployed BabyBear Poseidon2 parameter set (Plonky3 / SP1); and the base-field
+  trace ($4$-byte cells) avoids the $\GF{p^2}$ field tax across the whole proof. Measured, the effect
+  is decisive (Section 5.4).
+\item \textbf{Realization:} Arm B is fully implemented and tested \textbf{for functional correctness}:
+  the field, the deployed Poseidon2 (KAT against the published reference vector), the in-circuit
+  gadget, the wide sponge / Merkle, the membership AIR, and a transparent \textbf{and} zero-knowledge
+  prover / verifier, with an exhaustive per-column under-constraint audit and a negative-proof matrix
+  over all sub-AIRs. This is functional evidence, \textbf{not} a soundness proof: like Arm A, Arm B
+  remains open on O1 / O4 (Sections 6--7). Public statement:
+  $\mathit{root}(36) \cat \mathit{ctx}(16) \cat N(36) = 88$ bytes, per-cell $4$-byte canonical
+  little-endian.
+\end{itemize}
+
+\subsection{What the field choice does and does not change}
+
+The field choice governs O1 (round-count security) and, through it, O2 / O3 (collision and
+domain-separation, which assume a secure permutation). It does \textbf{not} affect O4 (the
+zero-knowledge simulator), which is a property of the hiding PCS and the masking-degree budget, not
+of the hash field. A reviewer's verdict on O4 transfers unchanged between the two arms.
+
+\subsection{Measured cost (both arms, equal \texorpdfstring{$128$}{128}-bit-PQ security)}
+
+Both arms are implemented and benchmarked at their $128$-bit-PQ configurations (Arm A: $\GF{p^6}$
+challenge, \texttt{log\_blowup}~3; Arm B: $\GF{q^5}$ challenge, \texttt{log\_blowup}~4; both bind on a
+SHAKE256 Merkle commitment at $128$ bits; Section 6.5). Single-thread, median of 5, membership depth
+32:
+
+\begin{table}[h]
+\centering\footnotesize
+\begin{tabular}{@{}lrrr@{}}
+\toprule
+ & Arm A ($\GF{p^2}$ / Poseidon256) & Arm B (BabyBear / Poseidon2) & Arm B advantage \\
+\midrule
+Trace row width          & $17\,152$         & $1\,661$         & $\approx 10\times$ narrower \\
+Bytes per trace row       & $137\,216$        & $6\,644$         & $\approx 21\times$ smaller  \\
+Proof size, transparent   & $\approx 16.4$ MB & $\approx 1.04$ MB & $\approx 16.6\times$ smaller \\
+Proof size, zero-knowledge & $\approx 16.7$ MB & $\approx 1.21$ MB & $\approx 14.4\times$ smaller \\
+Verify time               & $\approx 510$ ms  & $\approx 30$ ms   & $\approx 17\times$ faster    \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+The gap is \textbf{at equal security} (both reach the same $128$-bit hash floor), not a
+size-for-security trade. It tracks bytes-per-trace-row: FRI opens $\approx (\#\mathrm{queries}) \times
+(\text{trace width})$ field elements, and Arm A's Poseidon256 ($t = 7$, $68$ rounds, $8$-byte
+$\GF{p^2}$ cells) yields a far wider, heavier row than Arm B's Poseidon2 ($t = 16$, $21$ rounds,
+$4$-byte cells). This field / permutation effect, not the FRI blowup, dominates, so it holds across
+depths and in both transparent and zero-knowledge modes.
+
+\section{Security Analysis (O1--O4)}
+
+The structural audit shows the constraints faithfully encode the intended hash and Merkle relations.
+The following are the cryptographic obligations that an automated / structural argument cannot
+discharge. We give engineering derivations against the published formulas; we do \textbf{not} claim
+these are a substitute for independent expert review (Section 7).
+
+\subsection*{O1: Round-count / algebraic-degree security}
+
+\textbf{Instance (Arm A).} $\alpha = 5$, $t = 7$, $R_F = 8$, $R_P = 60$ ($68$ rounds) over $\GF{p^2}$,
+$\log_2|F| \approx 62$. Target $M = 128$-bit.
+
+We evaluate the published Poseidon round-count bounds \cite{GKRRS21} (\S5.5), \cite{ABM23}:
+statistical, interpolation, and the Gr\"obner-basis family, reproduced from the canonical
+generators. With $n = \log_2 p$ the field-size term, $\log_5 2 \approx 0.43068$:
+\begin{itemize}[leftmargin=*]
+\item \textbf{Statistical:} $R_F \geq 6$ if $M \leq \lfloor n - (\alpha-1)/2 \rfloor (t+1)$, else
+  $R_F \geq 10$.
+\item \textbf{Interpolation:} $R_F + R_P \geq 1 + \lceil \log_5 2 \cdot \min(M,n) \rceil +
+  \lceil \log_5 t \rceil$.
+\item \textbf{Gr\"obner:} several bounds, incl.\ $(t-1)(R_F + R_P) \geq (t-2) + M/(2 \log_2 \alpha)$
+  and the Macaulay-style $\mathrm{cost}_{\mathrm{gb}} \geq M$.
+\item \textbf{Margin:} $+2$ full rounds and $+7.5\%$ partial rounds over the minimum.
+\end{itemize}
+
+\begin{table}[h]
+\centering\footnotesize
+\begin{tabular}{@{}llll@{}}
+\toprule
+Regime & Binding bound (interpolation) & Margined optimal $(R_F, R_P)$ & Deployed $8 + 60$ \\
+\midrule
+$n = 62$ (realistic $\GF{p^2}$)   & $1 + \lceil 0.43068 \cdot 62 \rceil + 2 = 30$ & $(8, 26)$, total 34 & $\approx 2\times$ total / $2.3\times R_P$ \\
+$n = 31$ (pessimistic subfield)   & $1 + \lceil 0.43068 \cdot 31 \rceil + 2 = 17$ & $(8, 14)$, total 22 & $\approx 4.3\times R_P$ \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+$\mathrm{cost}_{\mathrm{gb}}$ for $(8, 60)$ evaluates to $\approx 349$ bits $\gg 128$. So $8 + 60$
+clears every published bound under both the realistic and worst-case-subfield substitutions.
+
+\textbf{Extension-field subtlety (the crux for review).} $\GF{p^2}$'s tower structure could
+\emph{reduce} security only via a \textbf{subfield descent}: if $\GF{p}^{\,7}$ were invariant under
+the round function, an attacker could work in the 31-bit subfield ($\min(M,n) \to 31$) and unlock
+invariant-subspace / subspace-trail Gr\"obner attacks \cite{Bariant22,GKR25}. The defense is
+\textbf{generic round constants}: drawing both the real and imaginary limb of every constant
+independently from the XOF gives each constant a pseudorandom nonzero imaginary part
+($\Pr[\mathrm{imag} = 0] \approx 2^{-31}$ per constant), so a single off-subfield constant per round
+maps $\GF{p}^{\,7}$ off itself and breaks subfield invariance. \emph{Caveat for the reviewer:} if the
+linear (MDS) layer is built from base-field entries, the linear layer alone preserves $\GF{p}^{\,7}$;
+the subfield defense then rests \textbf{entirely} on the constants' genericity. A future change that
+de-randomized the constants' imaginary parts would re-expose the subfield.
+
+\textbf{Adversarial self-check.} The 2024--2026 algebraic-attack wave (the FreeLunch / CheapLunch
+Gr\"obner attacks \cite{FreeLunch,CheapLunch} and subspace-trail Gr\"obner cryptanalysis of Poseidon
+\cite{GKR25}) pressures $R_P$ by linearizing partial rounds; $R_P = 60$ is $2.3$--$4.3\times$ the
+requirement, and the instances those attacks render borderline run $R_P$ at $\approx 1\times$. The
+off-envelope concern reduces to the constant-genericity check. Notably, \cite{GKR25} finds that the
+\emph{original} Poseidon round-count model can itself mis-estimate the rounds required for some
+instantiations (under- or over-counting); this makes the large $R_P = 60$ margin reassuring but is a
+further reason expert review, not formula evaluation alone, is warranted. The case does not survive
+automated scrutiny, but the residual against \emph{future} cryptanalysis of a $\GF{p^2}$-\emph{state}
+permutation (an unusual deployment choice) is real, and is why we seek review.
+
+\textbf{Arm B contrast.} Arm B's permutation is the deployed BabyBear Poseidon2 \cite{GKS23,Plonky3}:
+$\alpha = 7$, $t = 16$, $R_F = 8$, $R_P = 13$ over the base prime field ($\log_2 q \approx 30.9$),
+the \textbf{standard, widely-deployed} instantiation (Plonky3 / SP1) the round-count formulas target
+directly. O1 becomes confirmation that these published parameters are used unchanged (a base-field
+citation with no tower / subfield-invariance / off-envelope-state concern) rather than the novel
+extension-field analysis Arm A requires.
+
+\subsection*{O2: Collision / second-preimage of the truncated sponge}
+
+For a sponge on a random permutation, collision and (second-)preimage resistance are, up to the
+capacity \cite{BDPV08},
+\[
+\min\!\big(2^{c \cdot \log_2|F| / 2},\ 2^{\wout \cdot \log_2|F| / 2}\big).
+\]
+\begin{itemize}[leftmargin=*]
+\item \textbf{Arm A:} capacity $5 \cdot 62 = 310$ bits $\to 2^{155}$; output $5 \cdot 62 = 310$ bits
+  $\to 2^{155}$ and $\geq 256$-bit digest. Required capacity for $M = 128$ is
+  $c \geq 2M / \log_2|F| = 256/62 \approx 4.13$; $c = 5$ clears it. Truncation to
+  $\wout = 5\ (\geq 4.13)$ preserves $\geq 128$-bit output collision resistance; \emph{internal}
+  collisions (which enable Merkle-node equivocation) are governed by the capacity, not the output
+  width, so truncation does not weaken node-collision resistance. Sponges with nonzero capacity are
+  not length-extendable.
+\item \textbf{Arm B:} capacity $9 \cdot 30.9 \approx 278$ bits $\to \approx 2^{139}$; $9$-cell
+  $\approx 278$-bit digest $\geq 256$ bits (BabyBear $\approx 31$-bit cells; $c = 9 \geq
+  2M / \log_2 q \approx 8.3$ clears the $128$-bit floor).
+\end{itemize}
+O2 holds \emph{given} O1 (the permutation is a secure PRP at the $128$-bit level).
+
+\subsection*{O3: Domain separation (no leaf\texorpdfstring{$\leftrightarrow$}{<->}nullifier cross-collision)}
+
+The leaf preimage is the secret $t$; the nullifier preimage is the strictly longer
+$\mathit{domain} \cat t \cat \mathit{ctx}$; both use the same sponge with \texttt{10*1} padding.
+(i)~\emph{Cross-protocol:} a distinct $\mathit{domain}$ constant forces a distinct absorption from
+round 1, giving disjoint nullifier images (standard prefix domain separation). (ii)~\emph{No
+leaf$\leftrightarrow$nullifier impersonation:} the two preimages differ in length (so they absorb in
+a different number of permutations), and the nullifier carries the $\mathit{domain}$ prefix the leaf
+lacks; a collision between them is therefore a generic cross-length collision (O2), not a structural
+ambiguity, because \texttt{10*1} padding is injective on field-sequence inputs. O3 adds only the
+discipline that the domain string is globally unique to this statement.
+
+\subsection*{O4: Zero-knowledge simulator (field-independent)}
+
+\textbf{Implemented.} A hiding PCS (salted hiding-Merkle MMCS $+$ FRI on a vanishing-poly-randomized
+codeword at \texttt{log\_blowup}\,$+1$) keeps the witness ($t$, $L$, siblings, direction bits, all
+sponge intermediates) in the blinded trace; only $(\mathit{root}, \mathit{ctx}, N)$ is public. Two
+blinding-randomness leaks that we found and fixed: (L1) the salts / blinding polynomials must come
+from a CSPRNG, not a linear PRNG (a salted-but-linear generator is de-blindable when salts appear in
+the proof); (L2) the seeds must be fresh, independent, $\geq 256$-bit per proof, drawn from an OS
+CSPRNG, not fixed / guessable constants.
+
+\textbf{The residual we seek review on.} A formal simulator $\mathcal{S}$ that, given only
+$(\mathit{root}, \mathit{ctx}, N)$, outputs proofs computationally indistinguishable from honest
+ones. The structure: $\mathcal{S}$ commits to a random masking polynomial of the same degree budget
+and answers FRI / OOD queries via the standard ZK-STARK simulation \cite{BCRSVW19} $+$ hiding-PCS
+zero-knowledge \cite{Hab22}; indistinguishability reduces to (i)~hiding of the salted Merkle
+commitments and (ii)~the masking degree \textbf{strictly exceeding} the number of query $+$ OOD
+openings, so every revealed evaluation is uniform and independent of the witness. The
+\textbf{quantitative residual}: with the degree-$\alpha$ S-box forcing \texttt{log\_blowup}\,$\geq 3$ and a
+concrete $\#\mathrm{queries} + \#\mathrm{OOD}$, the masking degree under the hiding PCS must be
+confirmed $\geq \#\mathrm{openings} + 1$ for the production parameters, and the truncated-output
+sponge openings ($\wout$ of $t$ cells) must leak nothing beyond the public digest under that budget.
+O4 is field-independent; it transfers unchanged between Arm A and Arm B.
+
+\subsection*{6.5 Proof-system (PCS / FRI) soundness: the challenge field}
+
+O1--O4 concern the \emph{hash}; the proof system has its own soundness, bounded by the FRI / DEEP
+challenge field and the query phase and binding on the Merkle commitment. The field-dependent terms
+(out-of-domain / DEEP / proximity-gap) are \textbf{capped by the size of the challenge field},
+regardless of query count, a subtlety that cost us a real error: Arm A originally drew its
+challenges from its own $\approx 62$-bit value field $\GF{p^2}$, which caps DEEP soundness near $62$
+bits, and a query-only estimate masked it. The fix is a larger challenge extension. Both arms now
+compute to $128$-bit post-quantum soundness, \textbf{binding on a $256$-bit SHAKE256 Merkle
+commitment} ($128$-bit collision, NIST Category 2):
+\begin{itemize}[leftmargin=*]
+\item \textbf{Arm A:} challenge field $\GF{p^6}$ (degree-3 over $\GF{p^2}$, $\approx 186$ bits),
+  \texttt{log\_blowup}~3, $96$ queries, $20$ PoW bits $\to$ DEEP / Schwartz--Zippel $\approx 176$
+  bits; binding term $128$ (SHAKE256).
+\item \textbf{Arm B:} challenge field $\GF{q^5}$ (degree-5 over BabyBear, $\approx 155$ bits),
+  \texttt{log\_blowup}~4, $96$ queries, $20$ PoW bits $\to$ DEEP / Schwartz--Zippel $\approx 147$
+  bits; binding term $128$ (SHAKE256).
+\end{itemize}
+The post-quantum model is the deployed QROM one: Fiat--Shamir preserves a round-by-round-sound IOP up
+to small factors, Grover halves only the grinding proof-of-work, and the SHAKE256 binding is the
+$128$-bit term. This is a parameter characterization of the PCS layer; it assumes the AIR is sound
+and complete (the structural audit and per-column mutation tests are evidence, not proof) and that
+O1 holds.
+
+\section{Scope and the questions we seek review on}
+
+We do \textbf{not} claim O1--O4 are settled. The two residuals where independent expert review is
+decisive:
+\begin{enumerate}[leftmargin=*]
+\item \textbf{(O1) The $\GF{p^2}$-\emph{state} parameterization (Arm A).} Running the \emph{entire
+  permutation state} over $\GF{p^2}$ (rather than the base field, with the extension reserved for FRI
+  challenges) is an unusual deployment choice. We have shown $8 + 60$ clears the published bounds by
+  $\approx 2\times$ and that generic round constants close the subfield-descent path, but we seek
+  confirmation of: (a)~the constant-genericity argument as the intended subfield defense; (b)~the
+  absence of a residual invariant subspace under the base-field MDS $+$ generic-constant composition;
+  (c)~comfort with the $\GF{p^2}$-state convention against current and foreseeable algebraic
+  cryptanalysis. \emph{If a reviewer is uncomfortable, \textbf{Arm B, the recommended, implemented
+  base-field instantiation, avoids this obligation entirely}, reducing O1 to conformance with
+  published BabyBear Poseidon2 parameters.}
+\item \textbf{(O4) The simulator's masking-degree budget.} We seek a formal simulator write-up and
+  confirmation that the concrete masking degree $\geq \#\mathrm{queries} + \#\mathrm{OOD} + 1$ for the
+  production parameters, and that the truncated-output sponge openings leak nothing under that budget.
+\end{enumerate}
+
+On \textbf{Arm A vs.\ Arm B}: we recommend Arm B on the measured merits (at equal $128$-bit security
+its proofs are $\approx 14$--$18\times$ smaller and verify $\approx 16$--$17\times$ faster,
+Section 5.4) \emph{and} on the cleaner O1 (a base-field parameter citation, not an extension-field
+analysis). Arm A is the original $\GF{p^2}$ instantiation; we retain its full analysis because the
+$\GF{p^2}$-state construction is of independent interest, but the off-envelope O1 above is why we do
+not lead with it.
+
+A reviewer wishing to reproduce the O1 evaluation needs only the parameters in Section 5 and the
+public generators cited below; no proprietary material is involved.
+
+\section{Related Work}
+
+\begin{itemize}[leftmargin=*]
+\item \textbf{Algebraic hashes.} Poseidon \cite{GKRRS21} and Poseidon2 \cite{GKS23} establish the
+  round-count formulas and the base-field parameterizations we cite; the HADES design strategy and
+  its algebraic cryptanalysis \cite{ABM23}, with the recent attack literature
+  \cite{Bariant22,FreeLunch,CheapLunch,GKR25}, inform the O1 self-check.
+\item \textbf{Sponge security.} The indifferentiability and truncated-output bounds are from
+  Bertoni--Daemen--Peeters--Van Assche \cite{BDPV07,BDPV08}.
+\item \textbf{Transparent STARKs.} FRI and STARKs \cite{BBHR18,BGKS20}; circle STARKs over
+  Mersenne-31 \cite{HLP24}; zero-knowledge STARKs / hiding PCS \cite{BCRSVW19,Hab22}; the Plonky3
+  toolkit \cite{Plonky3} provides the BabyBear Poseidon2 reference parameters (Arm B) and the
+  two-adic FRI machinery both arms use.
+\item \textbf{Post-quantum proof systems (the other family).} The principal alternative post-quantum
+  ZK route is \emph{lattice-based}: LaBRADOR \cite{LaBRADOR} and the succinct-ZK toolkit of Biasioli
+  et al.\ \cite{BBL26} (building on it) give sub-$100$\,KB proofs for general statements (the
+  smallest among post-quantum schemes) at the cost of structured-lattice assumptions. We instead
+  rest only on hash collision resistance (transparent, no algebraic structure), trading proof size
+  for a more conservative assumption and a purpose-built membership relation.
+\item \textbf{Anonymous membership / nullifiers.} Semaphore-style signaling \cite{Sem}, rate-limiting
+  nullifiers \cite{RLN}, the PLUME deterministic-nullifier scheme \cite{PLUME}, and privacy-pool
+  constructions establish the leaf / nullifier pattern; our
+  contribution is a transparent, hash-only (post-quantum-oriented) instantiation over a small prime
+  field, with the accompanying parameter analysis.
+\end{itemize}
+
+\section*{Artifact Availability}
+
+All code, parameters, in-circuit audits, and the benchmarking harness behind the claims in this note
+are open source, so that the construction (Sections 3--4), the parameter sets and security analysis
+(Sections 5--6), and the measured comparison (Section 5.4) can be independently rebuilt and verified.
+
+\begin{itemize}[leftmargin=*]
+\item \textbf{Implementation.} \emph{Both arms} are implemented in the \texttt{lib-q-zkp} crate of the
+  \texttt{libQ} library: \url{https://github.com/Enkom-Tech/libQ} (Apache-2.0), pinned at commit
+  \texttt{34cb3f0} (tag \texttt{v0.0.8}). The shared in-circuit gadgets are \texttt{src/air/wide\_sponge.rs},
+  \texttt{wide\_merkle\_path.rs}, and \texttt{wide\_hash.rs}; the membership API is
+  \texttt{src/membership.rs} / \texttt{src/circuit.rs} / \texttt{src/api.rs}. \textbf{Arm A}
+  (\(\GF{p^2}\) / Mersenne-31): membership AIR \texttt{src/air/unlinkable\_membership.rs}, gadget
+  \texttt{src/air/poseidon\_gadget.rs} (\(\alpha=5\)), STARK config \texttt{src/stark.rs}, Merkle
+  \texttt{src/merkle.rs}. \textbf{Arm B} (BabyBear / Poseidon2): membership AIR
+  \texttt{src/air/unlinkable\_membership\_baby\_bear.rs}, gadget \texttt{src/air/poseidon2\_gadget.rs}
+  (\(\alpha=7\)), STARK config \texttt{src/stark\_baby\_bear.rs}, Merkle
+  \texttt{src/merkle\_baby\_bear.rs}. Both expose transparent and zero-knowledge prover/verifier paths.
+\item \textbf{Reproduction package.} A companion repository bundles this paper's source together with
+  a pinned snapshot (git submodule) of \texttt{libQ} and a \texttt{REPRODUCE.md} that maps each claim
+  to the file, test, or benchmark that backs it:
+  \url{https://github.com/En-Cipher/transparent-pq-anonymous-membership}.
+\item \textbf{Security analysis (O1--O4).} The round-count / soundness derivations are recorded in
+  \texttt{docs/membership-arm-a-soundness-params.md}, \texttt{membership-arm-b-soundness-params.md},
+  \texttt{membership-arm-b-obligation-packet.md}, \texttt{membership-adr113-freeze-gate-review.md},
+  and the adversarial self-check in \texttt{membership-arm-b-redteam.md}. The structural /
+  under-constraint audit is exercised by \texttt{tests/air\_integration.rs},
+  \texttt{tests/ip\_soundness\_tests.rs}, \texttt{tests/unlinkable\_membership\_tests.rs},
+  \texttt{tests/zero\_knowledge\_tests.rs}, and \texttt{tests/security\_parameter\_tests.rs}.
+\item \textbf{Measured cost (Section 5.4).} Produced by \texttt{benches/zkp\_benchmarks.rs} (harness
+  \texttt{measure\_arm\_a} / Arm B), documented in \texttt{docs/membership-arm-b-measurement.md}.
+  Environment: AMD Ryzen 9 5900X (12C/24T), Windows 10 IoT x86\_64, Rust 1.96 (edition 2024),
+  \texttt{cargo test --release}, single-threaded (the \texttt{parallel}/rayon feature off), prove and
+  verify reported as the median of 5, proof size via \texttt{postcard::to\_allocvec(proof).len()}.
+  Absolute timings are hardware-dependent; the cross-arm \emph{ratios} are the reproducible result.
+\end{itemize}
+
+\section*{Acknowledgements}
+
+\textbf{Use of generative AI tools.} The construction, the parameter choices, the security analysis,
+and the open questions raised for review are the author's own work. Generative AI software (Anthropic
+Claude, via Claude Code) was used as a drafting and editing aid for the exposition and to cross-check
+the write-up against the cited literature; all technical content was directed, checked, and is
+vouched for by the author. The author is solely responsible for the veracity and correctness of all
+claims; generative AI is not, and cannot be, an author.
+
+\begin{thebibliography}{Bariant+22}
+
+\bibitem[GKRRS21]{GKRRS21} L.~Grassi, D.~Khovratovich, C.~Rechberger, A.~Roy, M.~Schofnegger.
+  \emph{Poseidon: A New Hash Function for Zero-Knowledge Proof Systems.} USENIX Security 2021. IACR
+  ePrint 2019/458.
+
+\bibitem[GKS23]{GKS23} L.~Grassi, D.~Khovratovich, M.~Schofnegger. \emph{Poseidon2: A Faster Version
+  of the Poseidon Hash Function.} AFRICACRYPT 2023. IACR ePrint 2023/323.
+
+\bibitem[ABM23]{ABM23} T.~Ashur, T.~Buschman, M.~Mahzoun. \emph{Algebraic Cryptanalysis of the HADES
+  Design Strategy: Application to Poseidon and Poseidon2.} ACISP 2024. IACR ePrint 2023/537.
+
+\bibitem[BDPV07]{BDPV07} G.~Bertoni, J.~Daemen, M.~Peeters, G.~Van Assche. \emph{Sponge Functions.}
+  ECRYPT Hash Workshop 2007.
+
+\bibitem[BDPV08]{BDPV08} G.~Bertoni, J.~Daemen, M.~Peeters, G.~Van Assche. \emph{On the
+  Indifferentiability of the Sponge Construction.} EUROCRYPT 2008, LNCS 4965, pp.~181--197.
+
+\bibitem[BBHR18]{BBHR18} E.~Ben-Sasson, I.~Bentov, Y.~Horesh, M.~Riabzev. \emph{Scalable,
+  Transparent, and Post-Quantum Secure Computational Integrity.} IACR ePrint 2018/046.
+
+\bibitem[BGKS20]{BGKS20} E.~Ben-Sasson, L.~Goldberg, S.~Kopparty, S.~Saraf. \emph{DEEP-FRI: Sampling
+  Outside the Box Improves Soundness.} ITCS 2020. IACR ePrint 2019/336.
+
+\bibitem[HLP24]{HLP24} U.~Hab\"ock, D.~Levit, S.~Papini. \emph{Circle STARKs.} IACR ePrint 2024/278.
+
+\bibitem[BCRSVW19]{BCRSVW19} E.~Ben-Sasson, A.~Chiesa, M.~Riabzev, N.~Spooner, M.~Virza, N.~Ward.
+  \emph{Aurora: Transparent Succinct Arguments for R1CS.} EUROCRYPT 2019. IACR ePrint 2018/828.
+
+\bibitem[Hab22]{Hab22} U.~Hab\"ock. \emph{A Summary on the FRI Low Degree Test.} IACR ePrint
+  2022/1216.
+
+\bibitem[Bariant+22]{Bariant22} A.~Bariant, C.~Bouvier, G.~Leurent, L.~Perrin. \emph{Algebraic
+  Attacks against Some Arithmetization-Oriented Primitives.} IACR Trans.\ Symmetric Cryptol.\
+  2022(3), pp.~73--101.
+
+\bibitem[FreeLunch]{FreeLunch} A.~Bariant, A.~B\oe uf, A.~Lemoine, I.~Manterola Ayala, M.~\O ygarden,
+  L.~Perrin, H.~Raddum. \emph{The Algebraic FreeLunch: Efficient Gr\"obner Basis Attacks Against
+  Arithmetization-Oriented Primitives.} CRYPTO 2024. IACR ePrint 2024/347.
+
+\bibitem[CheapLunch]{CheapLunch} \emph{The Algebraic CheapLunch: Extending FreeLunch Attacks on
+  Arithmetization-Oriented Primitives Beyond CICO-1.} IACR ePrint 2025/2040.
+
+\bibitem[GKR25]{GKR25} L.~Grassi, K.~Koschatko, C.~Rechberger. \emph{Poseidon and Neptune: Gr\"obner
+  Basis Cryptanalysis Exploiting Subspace Trails.} IACR Trans.\ Symmetric Cryptol.\ 2025. IACR ePrint
+  2025/954.
+
+\bibitem[Plonky3]{Plonky3} The Plonky3 Authors. \emph{Plonky3: A toolkit for polynomial IOPs /
+  STARKs.} Software, \url{https://github.com/Plonky3/Plonky3} (source of the BabyBear Poseidon2
+  reference parameters).
+
+\bibitem[LaBRADOR]{LaBRADOR} W.~Beullens, G.~Seiler. \emph{LaBRADOR: Compact Proofs for R1CS from
+  Module-SIS.} CRYPTO 2023. IACR ePrint 2022/1341.
+
+\bibitem[BBL+26]{BBL26} B.~Biasioli, M.~Bolboceanu, V.~Lyubashevsky, A.~Merino-Gallardo, M.~Osadnik,
+  G.~Seiler, P.~Steuer. \emph{A Toolkit for Succinct Lattice-Based Zero-Knowledge Proofs.} IACR
+  ePrint 2026/1289.
+
+\bibitem[Sem]{Sem} Semaphore Protocol (Privacy \& Scaling Explorations). \emph{A zero-knowledge
+  protocol for anonymous signaling / group membership.} Documentation:
+  \url{https://docs.semaphore.pse.dev}; source: \url{https://github.com/semaphore-protocol/semaphore}.
+
+\bibitem[RLN]{RLN} Rate-Limiting Nullifier (Privacy \& Scaling Explorations). \emph{A
+  Merkle-membership $+$ nullifier spam-prevention gadget built on Semaphore (Shamir-secret-sharing key
+  recovery on a rate-limit breach).} Documentation:
+  \url{https://rate-limiting-nullifier.github.io/rln-docs/}; source:
+  \url{https://github.com/Rate-Limiting-Nullifier}.
+
+\bibitem[PLUME]{PLUME} A.~Gupta, K.~Gurkan. \emph{PLUME: An ECDSA Nullifier Scheme for Unique
+  Pseudonymity within Zero-Knowledge Proofs.} IACR ePrint 2022/1255.
+
+\end{thebibliography}
+
+\end{document}
