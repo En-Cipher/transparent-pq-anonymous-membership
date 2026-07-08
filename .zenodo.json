@@ -1,0 +1,26 @@
+{
+  "title": "Transparent, Post-Quantum Anonymous Set Membership from FRI-STARKs over BabyBear and Mersenne-31",
+  "upload_type": "publication",
+  "publication_type": "preprint",
+  "description": "A construction-and-analysis note and reproduction package for a transparent (no trusted setup), hash-only, plausibly post-quantum argument of anonymous set membership with a nullifier, realized as a FRI-STARK over a small prime field. Two field instantiations are implemented and measured (GF(p^2) over Mersenne-31, and base-field BabyBear with Poseidon2). This is not peer-reviewed: two security questions, O1 (the GF(p^2)-state Poseidon round counts, specific to the Mersenne-31 arm) and O4 (the formal zero-knowledge simulator, shared by both arms), are stated as open and pending independent review. Implementation completeness does not imply proven soundness.",
+  "creators": [
+    {
+      "name": "Kuskoff, Enoch",
+      "affiliation": "Enkom Tech"
+    }
+  ],
+  "license": "CC-BY-4.0",
+  "access_right": "open",
+  "keywords": [
+    "anonymous set membership",
+    "nullifier",
+    "zero-knowledge proofs",
+    "FRI-STARK",
+    "transparent setup",
+    "post-quantum cryptography",
+    "Poseidon2",
+    "algebraic hashing",
+    "BabyBear",
+    "Mersenne-31"
+  ]
+}
