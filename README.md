@@ -1,5 +1,7 @@
 # Transparent, Post-Quantum Anonymous Set Membership from FRI-STARKs over BabyBear and Mersenne-31
 
+[![DOI](https://zenodo.org/badge/1293791745.svg)](https://doi.org/10.5281/zenodo.21264992)
+
 Reproduction package for the construction-and-analysis note of the same title.
 
 **Author:** Enoch Kuskoff, Enkom Tech, `en.cipher@enkom.tech`
@@ -77,3 +79,19 @@ See [REPRODUCE.md](REPRODUCE.md) for the full claim-by-claim verification map an
 
 The paper and this repository's prose are released under CC BY 4.0 (see [LICENSE](LICENSE)). The
 bundled `libQ` submodule is licensed separately under Apache-2.0 (see its own `LICENSE`).
+
+## How to cite
+
+Enoch Kuskoff. *Transparent, Post-Quantum Anonymous Set Membership from FRI-STARKs over BabyBear and
+Mersenne-31.* Enkom Tech, 2026. https://doi.org/10.5281/zenodo.21264992
+
+```bibtex
+@misc{kuskoff2026membership,
+  author    = {Kuskoff, Enoch},
+  title     = {Transparent, Post-Quantum Anonymous Set Membership from FRI-STARKs over BabyBear and Mersenne-31},
+  year      = {2026},
+  publisher = {Zenodo},
+  doi       = {10.5281/zenodo.21264992},
+  url       = {https://doi.org/10.5281/zenodo.21264992}
+}
+```
