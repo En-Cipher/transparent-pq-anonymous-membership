@@ -1,6 +1,6 @@
 # Transparent, Post-Quantum Anonymous Set Membership from FRI-STARKs over BabyBear and Mersenne-31
 
-[![DOI](https://zenodo.org/badge/1293791745.svg)](https://doi.org/10.5281/zenodo.21264992)
+[![DOI](https://zenodo.org/badge/DOI/10.5281/zenodo.21264992.svg)](https://doi.org/10.5281/zenodo.21264992)
 
 Reproduction package for the construction-and-analysis note of the same title.
 
