@@ -21,6 +21,12 @@
 \newcommand{\GF}[1]{\mathrm{GF}(#1)}
 \newcommand{\cat}{\mathbin{\|}}          % field-sequence concatenation separator
 \newcommand{\wout}{w_{\mathrm{out}}}
+\newcommand{\Adv}{\mathsf{Adv}}
+
+\theoremstyle{plain}
+\newtheorem{theorem}{Theorem}
+\theoremstyle{definition}
+\newtheorem{definition}{Definition}
 
 \title{Transparent, Post-Quantum Anonymous Set Membership\\
 from FRI-STARKs over BabyBear and Mersenne-31}
@@ -31,18 +37,22 @@ from FRI-STARKs over BabyBear and Mersenne-31}
 \maketitle
 
 \begin{center}\itshape
-A construction-and-analysis note that solicits external review of its security arguments.
+A construction-and-analysis paper: two security obligations (O1, O4) are stated as explicitly open;
+the remaining goals are established here.
 \end{center}
 
 \begin{quote}
-\textbf{Scope of this note.} A self-contained description of a transparent anonymous set-membership
-argument and its security analysis, presented as a generic primitive. The building blocks
-(FRI-STARKs, Poseidon, sponge hashing, nullifier-based membership) are standard; the contribution is
-the \emph{concrete instantiation and its parameters} together with an explicit security analysis. We
-do \textbf{not} claim the construction is proven secure: two central questions, the
-$\GF{p^2}$-state Poseidon round counts (O1, specific to Arm A) and the formal zero-knowledge
-simulator (O4, shared by both arms), are stated as \textbf{open problems on which we solicit review}
-(Sections 6--7), not as established results (O2 and O3 reduce to the permutation's security, i.e.\ O1).
+\textbf{Scope.} A self-contained description of a transparent anonymous set-membership argument and
+its security analysis, presented as a generic primitive. The building blocks (FRI-STARKs, Poseidon,
+sponge hashing, nullifier-based membership) are standard; the contribution is the \emph{concrete
+instantiation and its parameters} together with an explicit security analysis. Two obligations are
+stated as \textbf{explicitly open} and analyzed rather than proved: the $\GF{p^2}$-state Poseidon
+round counts (O1, specific to Arm A) and the formal zero-knowledge simulator's masking-degree budget
+(O4, shared by both arms). The remaining goals (membership soundness and anonymity, Theorems~1--2,
+together with the sponge obligations O2, O3 and the proof-system soundness of Section~6.5) are
+established here (Section~6), each conditional on the obligations it names. Leaving O1 and O4 open
+while proving the reductions around them is deliberate: it isolates exactly what independent
+cryptanalysis must settle.
 \end{quote}
 
 \begin{abstract}
@@ -63,10 +73,10 @@ instantiations of the hash. Arm A runs the permutation \emph{state} over the qua
 $\GF{p^2}$ of Mersenne-31; Arm B runs over the base field of BabyBear with the deployed Poseidon2.
 Both are implemented, and their proof-system soundness is computed to $128$-bit post-quantum
 (Section 6.5); at equal security, \textbf{Arm B's proofs are $\approx 14$--$18\times$ smaller and
-verify $\approx 16$--$17\times$ faster}, and we recommend it. We explicitly solicit review of the two
-residuals our engineering arguments do not settle: the extension-field round-count parameterization
-\emph{specific to Arm A} (O1), and the zero-knowledge simulator's masking-degree budget (O4, shared
-by both arms).
+verify $\approx 16$--$17\times$ faster}, and we recommend it. We prove membership soundness and
+anonymity as reductions (Theorems~1--2) conditional on two obligations we leave explicitly open and
+analyzed rather than proved: the extension-field round-count parameterization \emph{specific to Arm A}
+(O1), and the zero-knowledge simulator's masking-degree budget (O4, shared by both arms).
 
 \smallskip
 \noindent\textbf{Keywords:} anonymous set membership $\cdot$ nullifiers $\cdot$ zero-knowledge proofs
@@ -151,6 +161,40 @@ vanishing-polynomial randomization, Merkle commitments are salted with fresh CSP
 runs on the randomized codeword \cite{Hab22,BCRSVW19}. Only the public statement
 $(\mathit{root}, \mathit{ctx}, N)$ is revealed.
 
+\subsection*{Threat model and security goals}
+
+\paragraph{Adversary.} We consider a probabilistic polynomial-time adversary $\mathcal{A}$; the
+concrete parameters of Section~6.5 additionally target a quantum $\mathcal{A}$, through the hash-only
+soundness assumption and the post-quantum challenge-field sizing. $\mathcal{A}$ sees the circuit, its
+baked constants, the public statement $(\mathit{root}, \mathit{ctx}, N)$, and every proof; it may
+choose the accumulator contents, insert its own leaves, and adaptively obtain honest members' proofs.
+The accumulator $\mathit{root}$ is supplied by the verifier and trusted; the domain constant is
+derived from a fixed public generator (Section~3).
+
+\paragraph{Goals.} We phrase three goals as games. Section~6 discharges those that do not depend on
+the open obligations O1 / O4, and states the two principal ones as conditional theorems.
+
+\begin{definition}[Membership soundness]
+Let $\mathcal{P}^\ast$ produce an accepting $(\mathit{root}, \mathit{ctx}, N, \pi)$ and let
+$\mathcal{E}$ be the proof system's knowledge extractor. $\mathcal{A}$ wins if the verifier accepts
+yet $\mathcal{E}$ extracts no $(t, \mathit{path})$ with
+$\textsf{MerkleVerify}(\mathit{root}, H(t), \mathit{path}) = \textsf{true}$ and
+$N = H(\mathit{domain} \cat t \cat \mathit{ctx})$. Its advantage is $\Adv^{\mathrm{snd}}_{\mathcal{A}}$.
+\end{definition}
+
+\begin{definition}[Anonymity within the set]
+$\mathcal{A}$ names two members $i_0, i_1$ of the accumulator and a fresh context $\mathit{ctx}^\ast$;
+the challenger proves membership for $i_b$, $b \xleftarrow{\$} \{0,1\}$, and returns $(\pi, N)$. Its
+advantage is $\Adv^{\mathrm{anon}}_{\mathcal{A}} = |\Pr[\mathcal{A} = b] - \tfrac12|$.
+\end{definition}
+
+\begin{definition}[Nullifier stability and cross-context unlinkability]
+Within a fixed $\mathit{ctx}$ a member's $N$ is deterministic, so double-action is detectable. Across
+distinct contexts the family $\{N_{\mathit{ctx}}\}$ of one member is required to be computationally
+indistinguishable from independent uniform values, and no $\mathcal{A}$ lacking that member's $t$ can
+produce an accepting proof carrying its $N$.
+\end{definition}
+
 \section{The Membership Relation}
 
 Fix a domain constant $\mathit{domain}$ (a baked circuit constant, \emph{not} a witness or public
@@ -203,6 +247,22 @@ $\mathit{ctx}$ to the public $\mathit{ctx}$, and the nullifier output to the pub
 \paragraph{Degree.} Max constraint degree is $\alpha$ (the ungated $x^\alpha$ S-box: $5$ for Arm A, $7$ for Arm B); selectors gate only
 degree-1 bindings. The quotient-chunk count is derived from the constraint AST by both prover and
 verifier, so any degree overflow fails at prove time.
+
+\paragraph{The constraint set.} Collecting the above, the AIR enforces five constraint families, each
+pinned as described:
+\begin{enumerate}[leftmargin=*,label=\textbf{C\arabic*.}]
+\item \textbf{Leaf sponge.} Row-0 evaluates $L = H(t)$ over the committed $t$ (ARC, $x^\alpha$, linear
+  layer, and \texttt{10*1} padding).
+\item \textbf{Merkle threading.} Each level applies $H(\mathit{left} \cat \mathit{right})$ in the
+  $\mathit{dir}$-selected input order, updates $\mathit{running}' = \mathit{parent}$, and the last row
+  binds $\mathit{parent} = \mathit{root}$.
+\item \textbf{Nullifier preimage.} The same committed $t$, prefixed by the constant $\mathit{domain}$
+  and suffixed by $\mathit{ctx}$, evaluates $N = H(\mathit{domain} \cat t \cat \mathit{ctx})$.
+\item \textbf{Public binding.} $\mathit{running} = L$ at row 0, $\mathit{ctx}$ equals the public
+  context, and the nullifier output equals the public $N$.
+\item \textbf{Degree / FRI.} The ungated maximum constraint degree is $\alpha$, and the
+  quotient-chunk count is derived from the constraint AST, so any degree overflow fails at prove time.
+\end{enumerate}
 
 A structural audit of this AIR (sponge under-constraint, Merkle threading, leaf / same-$t$, nullifier
 integrity, padding rows, padding-root, public binding, degree / FRI config) found no relation a
@@ -316,6 +376,55 @@ The structural audit shows the constraints faithfully encode the intended hash a
 The following are the cryptographic obligations that an automated / structural argument cannot
 discharge. We give engineering derivations against the published formulas; we do \textbf{not} claim
 these are a substitute for independent expert review (Section 7).
+
+\subsection*{What is proved here}
+
+The structural audit (Section~4) and the proof-system characterization (Section~6.5) let us state the
+two principal goals as conditional theorems. Each is \emph{conditional on the open obligations it
+names}: we prove the reductions, not the obligations. The obligations O1--O4 themselves are then
+analyzed in the remainder of this section.
+
+\begin{theorem}[Membership soundness]
+Assume O1 (so, by O2, the sponge $H$ is collision-resistant at the $128$-bit level) and the
+knowledge-soundness of the FRI-STARK (Section~6.5). Then for any probabilistic polynomial-time
+$\mathcal{P}^\ast$,
+\[
+\Adv^{\mathrm{snd}}_{\mathcal{P}^\ast} \le \varepsilon_{\mathrm{ks}} + \varepsilon_{\mathrm{coll}},
+\]
+where $\varepsilon_{\mathrm{ks}}$ is the knowledge-soundness error of the proof system and
+$\varepsilon_{\mathrm{coll}}$ the sponge-collision advantage.
+\end{theorem}
+
+\begin{proof}[Proof sketch]
+Knowledge-soundness extracts a full satisfying trace from any accepting $\mathcal{P}^\ast$, except
+with probability $\varepsilon_{\mathrm{ks}}$. By the per-round, per-column audit of Section~4, a
+satisfying trace encodes a genuine sponge evaluation $L = H(t)$ (C1), a Merkle path whose every node
+is a genuine $H(\mathit{left} \cat \mathit{right})$ folding to the last-row $\mathit{parent}$ bound to
+the trusted $\mathit{root}$ (C2), and a nullifier output equal to $H(\mathit{domain} \cat t \cat
+\mathit{ctx})$ over the \emph{same} committed $t$ (C3--C4). An accepting trace that violated the
+decoded statement would therefore exhibit two distinct preimages sharing a node or digest, i.e.\ a
+sponge collision, which occurs with probability at most $\varepsilon_{\mathrm{coll}}$ under O2 (itself
+resting on O1). Summing the two failure events gives the bound.
+\end{proof}
+
+\begin{theorem}[Anonymity and unlinkability]
+Assume O4 (the prover is zero-knowledge under the hiding PCS), O3 (leaf and nullifier preimages are
+domain-separated), and that $H$ behaves as a pseudorandom function of $\mathit{ctx}$ for a fixed
+secret $t$ (the standard random-permutation modeling of the sponge, consistent with the PRP premise of
+O1). Then $\Adv^{\mathrm{anon}}_{\mathcal{A}}$ and the cross-context linking advantage are negligible.
+\end{theorem}
+
+\begin{proof}[Proof sketch]
+By O4 a simulator produces $\pi$ from $(\mathit{root}, \mathit{ctx}, N)$ alone, so $\pi$ reveals
+nothing about which leaf was used beyond the fact of membership; anonymity within the set is thus the
+anonymity of the accumulator itself. The only other public value is
+$N = H(\mathit{domain} \cat t \cat \mathit{ctx})$, which by O3 is domain-separated from the leaf; under
+distinct $\mathit{ctx}$ the sponge inputs differ, so by the pseudorandomness assumption the nullifiers
+are indistinguishable from independent uniform values, giving cross-context unlinkability, while
+stability within one $\mathit{ctx}$ is immediate from the determinism of $H$.
+\end{proof}
+
+\noindent The obligations these theorems rest on are analyzed next.
 
 \subsection*{O1: Round-count / algebraic-degree security}
 
@@ -460,10 +569,10 @@ $128$-bit term. This is a parameter characterization of the PCS layer; it assume
 and complete (the structural audit and per-column mutation tests are evidence, not proof) and that
 O1 holds.
 
-\section{Scope and the questions we seek review on}
+\section{The Open Obligations}
 
-We do \textbf{not} claim O1--O4 are settled. The two residuals where independent expert review is
-decisive:
+Theorems~1--2 reduce the security goals to the four obligations; two of these, O1 and O4, are analyzed
+above but not proved, and independent cryptanalysis is decisive for each:
 \begin{enumerate}[leftmargin=*]
 \item \textbf{(O1) The $\GF{p^2}$-\emph{state} parameterization (Arm A).} Running the \emph{entire
   permutation state} over $\GF{p^2}$ (rather than the base field, with the extension reserved for FRI

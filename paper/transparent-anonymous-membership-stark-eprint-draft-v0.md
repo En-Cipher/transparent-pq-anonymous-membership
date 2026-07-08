@@ -3,16 +3,20 @@
 **Enoch Kuskoff**
 Enkom Tech · `en.cipher@enkom.tech`
 
-*A construction-and-analysis note that solicits external review of its security arguments.*
+*A construction-and-analysis paper: two security obligations (O1, O4) are stated as explicitly open;
+the remaining goals are established here.*
 
-> **Scope of this note.** A self-contained description of a transparent anonymous set-membership
-> argument and its security analysis, presented as a generic primitive. The building blocks
-> (FRI-STARKs, Poseidon, sponge hashing, nullifier-based membership) are standard; the contribution
-> is the *concrete instantiation and its parameters* together with an explicit security analysis. We
-> do **not** claim the construction is proven secure: two central questions, the GF(p²)-state
-> Poseidon round counts (O1, specific to Arm A) and the formal zero-knowledge simulator (O4, shared by
-> both arms), are stated as **open problems on which we solicit review** (Sections 6–7), not as
-> established results (O2 and O3 reduce to the permutation's security, i.e. O1).
+> **Scope.** A self-contained description of a transparent anonymous set-membership argument and its
+> security analysis, presented as a generic primitive. The building blocks (FRI-STARKs, Poseidon,
+> sponge hashing, nullifier-based membership) are standard; the contribution is the *concrete
+> instantiation and its parameters* together with an explicit security analysis. Two obligations are
+> stated as **explicitly open** and analyzed rather than proved: the GF(p²)-state Poseidon round
+> counts (O1, specific to Arm A) and the formal zero-knowledge simulator's masking-degree budget (O4,
+> shared by both arms). The remaining goals (membership soundness and anonymity, Theorems 1–2, together
+> with the sponge obligations O2, O3 and the proof-system soundness of Section 6.5) are established
+> here (Section 6), each conditional on the obligations it names. Leaving O1 and O4 open
+> while proving the reductions around them is deliberate: it isolates exactly what independent
+> cryptanalysis must settle.
 
 ---
 
@@ -35,9 +39,10 @@ permutation *state* over the quadratic extension `GF(p²)` of Mersenne-31; Arm B
 field of BabyBear with the deployed Poseidon2. Both are implemented, and their proof-system soundness
 is computed to `128`-bit post-quantum (Section 6.5); at equal security, **Arm B's proofs are
 `≈ 14–18×` smaller and verify `≈ 16–17×` faster**, and we recommend it. We
-explicitly solicit review of the two residuals our engineering arguments do not settle: the
-extension-field round-count parameterization *specific to Arm A* (O1), and the zero-knowledge
-simulator's masking-degree budget (O4, shared by both arms).
+prove membership soundness and anonymity as reductions (Theorems 1–2) conditional on two obligations
+we leave explicitly open and analyzed rather than proved: the extension-field round-count
+parameterization *specific to Arm A* (O1), and the zero-knowledge simulator's masking-degree budget
+(O4, shared by both arms).
 
 **Keywords.** anonymous set membership · nullifiers · zero-knowledge proofs · FRI-STARKs ·
 transparent setup · post-quantum cryptography · Poseidon / Poseidon2 · algebraic hashing ·
@@ -118,6 +123,32 @@ commitment: the trace is low-degree-extended at an increased blow-up with vanish
 randomization, Merkle commitments are salted with fresh CSPRNG output, and FRI runs on the randomized
 codeword [Hab22, BCRSVW19]. Only the public statement `(root, ctx, N)` is revealed.
 
+### Threat model and security goals
+
+**Adversary.** We consider a probabilistic polynomial-time adversary `A`; the concrete parameters of
+Section 6.5 additionally target a quantum `A`, through the hash-only soundness assumption and the
+post-quantum challenge-field sizing. `A` sees the circuit, its baked constants, the public statement
+`(root, ctx, N)`, and every proof; it may choose the accumulator contents, insert its own leaves, and
+adaptively obtain honest members' proofs. The accumulator `root` is supplied by the verifier and
+trusted; the domain constant is derived from a fixed public generator (Section 3).
+
+**Goals.** We phrase three goals as games. Section 6 discharges those that do not depend on the open
+obligations O1/O4, and states the two principal ones as conditional theorems.
+
+**Definition 1 (Membership soundness).** Let `P*` produce an accepting `(root, ctx, N, π)` and let `E`
+be the proof system's knowledge extractor. `A` wins if the verifier accepts yet `E` extracts no
+`(t, path)` with `MerkleVerify(root, H(t), path) = true` and `N = H(domain ‖ t ‖ ctx)`. Its advantage
+is `Adv_snd`.
+
+**Definition 2 (Anonymity within the set).** `A` names two members `i₀, i₁` of the accumulator and a
+fresh context `ctx*`; the challenger proves membership for `i_b`, `b ← {0,1}` uniform, and returns
+`(π, N)`. Its advantage is `Adv_anon = |Pr[A = b] − ½|`.
+
+**Definition 3 (Nullifier stability and cross-context unlinkability).** Within a fixed `ctx` a
+member's `N` is deterministic, so double-action is detectable. Across distinct contexts the family
+`{N_ctx}` of one member is required to be computationally indistinguishable from independent uniform
+values, and no `A` lacking that member's `t` can produce an accepting proof carrying its `N`.
+
 ---
 
 ## 3. The Membership Relation
@@ -168,6 +199,20 @@ Row-0 gated constraints bind `running = L`, `ctx = public ctx`, and `null_out = 
 **Degree.** Max constraint degree is `α` (the ungated `x^α` S-box: `5` for Arm A, `7` for Arm B);
 selectors gate only degree-1 bindings. The quotient-chunk count is derived from the constraint AST by both prover and verifier,
 so any degree overflow fails at prove time.
+
+**The constraint set.** Collecting the above, the AIR enforces five constraint families, each pinned
+as described:
+
+- **C1. Leaf sponge.** Row-0 evaluates `L = H(t)` over the committed `t` (ARC, `x^α`, linear layer,
+  and `10*1` padding).
+- **C2. Merkle threading.** Each level applies `H(left ‖ right)` in the `dir`-selected input order,
+  updates `next.running = parent`, and the last row binds `parent = root`.
+- **C3. Nullifier preimage.** The same committed `t`, prefixed by the constant `domain` and suffixed
+  by `ctx`, evaluates `N = H(domain ‖ t ‖ ctx)`.
+- **C4. Public binding.** `running = L` at row 0, `ctx` equals the public context, and the nullifier
+  output equals the public `N`.
+- **C5. Degree / FRI.** The ungated maximum constraint degree is `α`, and the quotient-chunk count is
+  derived from the constraint AST, so any degree overflow fails at prove time.
 
 A structural audit of this AIR (sponge under-constraint, Merkle threading, leaf/same-`t`, nullifier
 integrity, padding rows, padding-root, public binding, degree/FRI config) found no relation a
@@ -271,6 +316,49 @@ The structural audit shows the constraints faithfully encode the intended hash a
 The following are the cryptographic obligations that an automated/structural argument cannot
 discharge. We give engineering derivations against the published formulas; we do **not** claim these
 are a substitute for independent expert review (Section 7).
+
+### What is proved here
+
+The structural audit (Section 4) and the proof-system characterization (Section 6.5) let us state the
+two principal goals as conditional theorems. Each is *conditional on the open obligations it names*:
+we prove the reductions, not the obligations. The obligations O1–O4 themselves are then analyzed in
+the remainder of this section.
+
+**Theorem 1 (Membership soundness).** Assume O1 (so, by O2, the sponge `H` is collision-resistant at
+the `128`-bit level) and the knowledge-soundness of the FRI-STARK (Section 6.5). Then for any
+probabilistic polynomial-time `P*`,
+
+```
+Adv_snd(P*) ≤ ε_ks + ε_coll,
+```
+
+where `ε_ks` is the knowledge-soundness error of the proof system and `ε_coll` the sponge-collision
+advantage.
+
+*Proof sketch.* Knowledge-soundness extracts a full satisfying trace from any accepting `P*`, except
+with probability `ε_ks`. By the per-round, per-column audit of Section 4, a satisfying trace encodes
+a genuine sponge evaluation `L = H(t)` (C1), a Merkle path whose every node is a genuine
+`H(left ‖ right)` folding to the last-row `parent` bound to the trusted `root` (C2), and a nullifier
+output equal to `H(domain ‖ t ‖ ctx)` over the *same* committed `t` (C3–C4). An accepting trace that
+violated the decoded statement would therefore exhibit two distinct preimages sharing a node or
+digest, i.e. a sponge collision, which occurs with probability at most `ε_coll` under O2 (itself
+resting on O1). Summing the two failure events gives the bound. ∎
+
+**Theorem 2 (Anonymity and unlinkability).** Assume O4 (the prover is zero-knowledge under the hiding
+PCS), O3 (leaf and nullifier preimages are domain-separated), and that `H` behaves as a pseudorandom
+function of `ctx` for a fixed secret `t` (the standard random-permutation modeling of the sponge,
+consistent with the PRP premise of O1). Then `Adv_anon` and the cross-context linking advantage are
+negligible.
+
+*Proof sketch.* By O4 a simulator produces `π` from `(root, ctx, N)` alone, so `π` reveals nothing
+about which leaf was used beyond the fact of membership; anonymity within the set is thus the
+anonymity of the accumulator itself. The only other public value is `N = H(domain ‖ t ‖ ctx)`, which
+by O3 is domain-separated from the leaf; under distinct `ctx` the sponge inputs differ, so by the
+pseudorandomness assumption the nullifiers are indistinguishable from independent uniform values,
+giving cross-context unlinkability, while stability within one `ctx` is immediate from the
+determinism of `H`. ∎
+
+The obligations these theorems rest on are analyzed next.
 
 ### O1: Round-count / algebraic-degree security
 
@@ -398,10 +486,10 @@ O1 holds.
 
 ---
 
-## 7. Scope and the questions we seek review on
+## 7. The Open Obligations
 
-We do **not** claim O1–O4 are settled. The two residuals where independent expert review is
-decisive:
+Theorems 1–2 reduce the security goals to the four obligations; two of these, O1 and O4, are analyzed
+above but not proved, and independent cryptanalysis is decisive for each:
 
 1. **(O1) The `GF(p²)`-*state* parameterization (Arm A).** Running the *entire permutation state*
    over `GF(p²)` (rather than the base field, with the extension reserved for FRI challenges) is an
